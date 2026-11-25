@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A World Model for Assembly Sequence Planning</title>
+  <meta name="description" content="A manipulation-level world model that plans LEGO assembly sequences by looking ahead in a learned latent space.">
+  <meta property="og:title" content="A World Model for Assembly Sequence Planning">
+  <meta property="og:description" content="A manipulation-level world model that plans LEGO assembly sequences by looking ahead in a learned latent space.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="static/img/poster.jpg">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>A World Model for Assembly Sequence Planning</h1>
+
+    <p class="authors">
+      <span>Xilun Chen<sup>1</sup></span>
+      <span>Roozbeh Mottaghi<sup>2</sup></span>
+    </p>
+    <p class="affils">
+      <span><sup>1</sup>The Chinese University of Hong Kong, Shenzhen</span>
+      <span><sup>2</sup>University of Washington</span>
+    </p>
+
+    <p class="links">
+      <!-- TODO: replace href with the arXiv URL once the paper is listed, and remove class="soon" -->
+      <a class="btn soon" href="#" aria-disabled="true" title="The arXiv link will be added here">Paper (arXiv, coming soon)</a>
+      <a class="btn" href="#video">Video</a>
+      <a class="btn" href="#bibtex">BibTeX</a>
+    </p>
+  </div>
+</header>
+
+<main>
+
+<section id="video" class="wrap">
+  <video class="main-video" controls preload="metadata" playsinline poster="static/img/poster.jpg">
+    <source src="static/video/wm_asp_overview.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</section>
+
+<section id="abstract" class="wrap narrow">
+  <h2>Abstract</h2>
+  <p>
+    This paper proposes a world model for planning assembly sequences for LEGO structures.
+    The model predicts placement feasibility by looking ahead in a learned latent space,
+    without invoking a physical simulator inside the look-ahead search. The primary technical
+    challenge lies in judging whether committing to a placement leaves the remaining structure
+    buildable, which requires reasoning over future steps. To address this, we represent the
+    assembly with a multi-granularity heterogeneous graph, in which a master node aggregates
+    the overall geometry of the assembled structure as a set of anchor tokens, while a
+    brick-level sub-graph carries the interlocking topology and the static attributes of each
+    brick. A latent dynamics model advances the anchor tokens locally after each placement,
+    which lets the world model roll the geometry forward over several steps and anticipate
+    whether a candidate placement obstructs the assembly of the remaining bricks. We validate
+    the framework on held-out test structures from the StableText2Lego (Pun et al., 2025)
+    benchmark, comparing it against ablations and recent assembly-sequence methods. Our planner
+    achieves near-oracle solutions while issuing the fewest exact-oracle calls per brick and
+    avoiding the later-infeasible placements incurred by the baselines.
+  </p>
+</section>
+
+<section class="wrap narrow">
+  <h2>Why look ahead?</h2>
+  <p>
+    Given a target LEGO structure, we want a sequence that a robot can actually build.
+    Prior methods either look ahead with only a coarse feasibility proxy, or check
+    feasibility exactly but only one step at a time. Either way, a brick placed now can
+    block a step that comes much later.
+  </p>
+  <figure>
+    <video autoplay loop muted playsinline preload="metadata">
+      <source src="static/video/deadend.mp4" type="video/mp4">
+    </video>
+    <figcaption>A placement that is feasible now can leave the remaining structure unbuildable.</figcaption>
+  </figure>
+</section>
+
+<section class="wrap narrow">
+  <h2>A manipulation-level world model</h2>
+  <p>
+    Our world model consists of an encoder that abstracts the assembly into a latent state,
+    a dynamics model that updates the latent state during rollout, and five predicate gates
+    that read out the feasibility of an action.
+  </p>
+  <figure>
+    <img src="static/img/architecture.png" alt="World model architecture: input, abstraction, latent state with dynamics, and read-out heads." loading="lazy">
+    <figcaption>The world model: abstraction of the assembly into a latent state, a dynamics model that advances it, and read-out heads whose conjunction gives the feasibility of an action.</figcaption>
+  </figure>
+  <p>
+    The five predicates are the press and reach gates, a collision head, and a stability
+    head applied before and after the action. All five must hold simultaneously.
+  </p>
+  <figure>
+    <video autoplay loop muted playsinline preload="metadata">
+      <source src="static/video/gates.mp4" type="video/mp4">
+    </video>
+    <figcaption>The five predicate gates evaluated on candidate actions. An action is feasible only if every gate passes.</figcaption>
+  </figure>
+  <p>
+    These predicates consume information at different structural levels: stability depends
+    only on the interlocking among bricks, while collision depends only on the exposed
+    surface geometry of the assembly. We therefore give the world model a hierarchical
+    heterogeneous graph, in which a master node <i>M</i><sub>built</sub> aggregates the
+    overall geometry of the assembled structure into a set of geometric latent anchors, and
+    a brick-level sub-graph beneath it carries the interlocking topology.
+  </p>
+  <figure class="light">
+    <img src="static/img/fig2_abstraction.png" alt="Structural abstraction: the planner view with a flat brick connection graph and anchor set selection, and the world-model view with a hierarchical heterogeneous latent graph." loading="lazy">
+    <figcaption>Structural abstraction. Planner view: flat brick connection graph and anchor set selection. World-model view: hierarchical heterogeneous latent graph, with anchor tokens updated after each action.</figcaption>
+  </figure>
+</section>
+
+<section class="wrap narrow">
+  <h2>Planning by latent rollout</h2>
+  <p>
+    We plan by disassembly: starting from the completed target, bricks are removed one
+    group at a time until the structure is empty, and reversing the removal order yields a
+    valid assembly sequence. At each step, an outer planner enumerates the bricks and groups
+    that can currently be removed. The world model then rolls out each candidate in latent
+    space and checks its feasibility. Every candidate is scored by the number of feasible
+    continuations it opens, and the highest-scoring candidate is committed. This enumerate, roll out,
+    and commit loop repeats until every brick has been removed.
+  </p>
+  <figure>
+    <video autoplay loop muted playsinline preload="metadata">
+      <source src="static/video/rollout.mp4" type="video/mp4">
+    </video>
+    <figcaption>Each column is the rollout of one candidate. The candidate with the highest score is committed.</figcaption>
+  </figure>
+</section>
+
+<section class="wrap narrow">
+  <h2>Results</h2>
+  <p>
+    Assembly sequences produced by our world model across diverse brick structures, executed
+    by two robot arms in simulation (playback is sped up).
+  </p>
+  <figure>
+    <video autoplay loop muted playsinline preload="metadata">
+      <source src="static/video/gallery.mp4" type="video/mp4">
+    </video>
+  </figure>
+  <p>
+    We compare against ablations and external baselines on held-out test structures.
+    Our planner achieves near-oracle solutions while issuing the fewest exact-oracle calls
+    per brick. Please refer to the paper for the full protocol and analysis.
+  </p>
+  <div class="table-block">
+    <table>
+      <caption>Predicate ablation (group size up to 5)</caption>
+      <thead><tr><th>Predicate</th><th>Success</th><th>McNemar</th><th>Oracle calls / brick</th></tr></thead>
+      <tbody>
+      <tr><td>seq/none</td><td>0.789</td><td>—</td><td>2.07</td></tr>
+      <tr><td>reach/none</td><td>0.789</td><td>0:0, p &gt; 0.05</td><td>2.07</td></tr>
+      <tr><td>reach/rollout</td><td>0.825</td><td>235:408, p &lt; 10<sup>&minus;10</sup></td><td>0.57</td></tr>
+      <tr class="ours"><td>wm/rollout (ours)</td><td>0.905</td><td>129:511, p &lt; 10<sup>&minus;50</sup></td><td>0.52</td></tr>
+      <tr><td>oracle/none</td><td>0.857</td><td>314:83, p &lt; 10<sup>&minus;30</sup></td><td>1.93</td></tr>
+      </tbody>
+    </table>
+    <p class="table-note">McNemar compares each row with the row above; the last row is a single-step exact-oracle reference (depth 0).</p>
+  </div>
+
+  <div class="table-block">
+    <table>
+      <caption>External comparison</caption>
+      <thead><tr><th>Method</th><th>Success (k/n)</th><th>McNemar</th></tr></thead>
+      <tbody>
+      <tr><td>WorkBenchMark</td><td>0.480 (36/75)</td><td>13:0, p &lt; 10<sup>&minus;3</sup></td></tr>
+      <tr><td>ASAP (GNN)</td><td>0.347 (26/75)</td><td>23:0, p &lt; 10<sup>&minus;6</sup></td></tr>
+      <tr><td>Ours (single-brick actions only)</td><td>0.653 (49/75)</td><td>—</td></tr>
+      <tr class="ours"><td>Ours (groups of up to 5 bricks)</td><td>1.000 (75/75)</td><td>—</td></tr>
+      <tr><td>Exact oracle + look-ahead</td><td>0.587 (44/75)</td><td>—</td></tr>
+      <tr><td>H-WM</td><td>0.343 (411/1200)</td><td>673:10, p &lt; 10<sup>&minus;140</sup></td></tr>
+      <tr><td>OR solver</td><td>0.312 (374/1200)</td><td>720:2, p &lt; 10<sup>&minus;156</sup></td></tr>
+      <tr><td>PhysWorld</td><td>0.809 (971/1200)</td><td>157:36, p &lt; 10<sup>&minus;17</sup></td></tr>
+      </tbody>
+    </table>
+    <p class="table-note">WorkBenchMark and ASAP: 75-structure small set (9&ndash;32 bricks). H-WM, PhysWorld and OR solver: 1,200-structure set, stratified by brick count. Success counts timeouts as failures.</p>
+  </div>
+</section>
+
+<section id="bibtex" class="wrap narrow">
+  <h2>BibTeX</h2>
+  <!-- TODO: fill in the arXiv identifier once it is assigned -->
+<pre><code>@article{chen2026wmasp,
+  title   = {A World Model for Assembly Sequence Planning},
+  author  = {Chen, Xilun and Mottaghi, Roozbeh},
+  journal = {arXiv preprint},
+  year    = {2026}
+}</code></pre>
+</section>
+
+</main>
+
+<footer class="wrap narrow">
+  <p>&copy; 2026 The authors.</p>
+</footer>
+
+</body>
+</html>
